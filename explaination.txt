@@ -9,3 +9,4 @@ Resources used:
 1. Lecture slide explaining Kaminsky attack.
 2. https://scapy.readthedocs.io/en/latest/api/scapy.layers.dns.html
 3. https://courses.cs.duke.edu//fall16/compsci356/DNS/DNS-primer.pdf
+4. https://pytutorial.com/python-how-to-use-tldextract-with-examples/
