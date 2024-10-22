@@ -1,6 +1,5 @@
 import sys
 import scapy.all as scapy
-import threading
 from concurrent.futures import ThreadPoolExecutor
 
 # Get list of network interfaces available on the system
