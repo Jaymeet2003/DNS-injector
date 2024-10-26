@@ -168,7 +168,7 @@ def parse_args():
     """
     global interface
 
-    if len(sys.argv) < 3 or len(sys.argv) > 5:
+    if len(sys.argv) > 3 or len(sys.argv) > 5:
         print("Usage: dnsinjector.py [-i interface] [-h hostnames]")
         sys.exit(1)
     for i in range(1, len(sys.argv)):
