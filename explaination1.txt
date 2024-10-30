@@ -1,0 +1,11 @@
+This DNS injection script enables a man-on-the-side (MOTS) attack by intercepting DNS queries and injecting forged responses that redirect the queried domain to an attacker-controlled IP. 
+The script listens for DNS requests using Scapy, creates a fake DNS response with a matching transaction ID and other necessary fields, and sends it back to the client. 
+By responding faster than the legitimate DNS server, the forged response reaches the client first, effectively rerouting the traffic without directly disrupting the original DNS communication. 
+This approach exploits DNS’s lack of authentication and UDP’s non-reliable transmission, allowing the attacker to influence traffic direction discreetly.
+
+
+Resources used:
+
+1. Lecture slide explaining MOTS attacks.
+2. https://scapy.readthedocs.io/en/latest/api/scapy.layers.dns.html
+3. https://courses.cs.duke.edu//fall16/compsci356/DNS/DNS-primer.pdf
